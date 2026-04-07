@@ -40,18 +40,20 @@ class MotionMaskGenerator:
         return soft_mask
 
 def create_motion_masks(flows):
-    """Create motion masks for flows"""
-    generator = MotionMaskGenerator()
+
     masks = []
-    
+
     for flow in flows:
-        hard_mask = generator.generate_mask(flow, adaptive=True)
-        soft_mask = generator.generate_soft_mask(flow)
-        
+        mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+
+        # Normalize
+        mag_norm = cv2.normalize(mag, None, 0, 1, cv2.NORM_MINMAX)
+
+        # Smooth
+        mag_norm = cv2.GaussianBlur(mag_norm, (9, 9), 0)
+
         masks.append({
-            'hard': hard_mask,
-            'soft': soft_mask,
-            'magnitude': generator.compute_motion_magnitude(flow)
+            "soft": mag_norm
         })
-    
+
     return masks

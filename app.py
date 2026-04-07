@@ -9,7 +9,6 @@ import tempfile
 import time
 import matplotlib.pyplot as plt
 
-# 🔥 PIPELINE
 from pipeline.main_pipeline import LowLightEnhancementPipeline
 from core.optical_flow import compute_sequence_flow
 from core.motion_mask import create_motion_masks
@@ -20,66 +19,60 @@ pipeline = LowLightEnhancementPipeline()
 # ===========================
 # PAGE CONFIG
 # ===========================
-st.set_page_config(
-    page_title="LuminaEnhance Pro",
-    page_icon="🔆",
-    layout="wide"
-)
+st.set_page_config(page_title="LuminaEnhance Pro", page_icon="🔆", layout="wide")
 
 # ===========================
-# CUSTOM CSS (ENHANCED UI)
+# PREMIUM CSS
 # ===========================
 st.markdown("""
 <style>
-body {background-color: #0f172a;}
-.block-container {padding-top: 2rem;}
+body {
+    background: linear-gradient(135deg, #0f172a, #020617);
+}
 
 .title {
-    font-size: 2.8rem;
+    font-size: 3rem;
     font-weight: 800;
+    text-align: center;
     background: linear-gradient(90deg,#4f46e5,#06b6d4);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
 .subtitle {
-    color: #9ca3af;
-    font-size: 1.2rem;
-    margin-bottom: 20px;
-}
-
-.card {
-    background: #111827;
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid #1f2937;
-    margin-bottom: 20px;
+    text-align: center;
+    color: #94a3b8;
+    margin-bottom: 30px;
 }
 
 .feature {
-    padding: 15px;
+    background: rgba(255,255,255,0.05);
+    padding: 12px;
     border-radius: 12px;
-    background: #1f2937;
     text-align: center;
+    backdrop-filter: blur(8px);
+}
+
+.section {
+    margin-top: 30px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ===========================
-# HERO SECTION
+# HERO
 # ===========================
 st.markdown("<div class='title'>🔆 LuminaEnhance Pro</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Smart Low-Light Enhancement using Adaptive AI</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Adaptive Low-Light Enhancement for Mobile Cameras</div>", unsafe_allow_html=True)
 
-# Feature Row
 f1, f2, f3, f4 = st.columns(4)
-f1.markdown("<div class='feature'>🧠 Adaptive AI</div>", unsafe_allow_html=True)
-f2.markdown("<div class='feature'>📸 Multi-Frame Fusion</div>", unsafe_allow_html=True)
+f1.markdown("<div class='feature'>🧠 AI Adaptive</div>", unsafe_allow_html=True)
+f2.markdown("<div class='feature'>📸 Multi-Frame</div>", unsafe_allow_html=True)
 f3.markdown("<div class='feature'>🎯 Motion Aware</div>", unsafe_allow_html=True)
-f4.markdown("<div class='feature'>👤 Face Protection</div>", unsafe_allow_html=True)
+f4.markdown("<div class='feature'>👤 Face Safe</div>", unsafe_allow_html=True)
 
 # ===========================
-# PIPELINE FUNCTION
+# PIPELINE
 # ===========================
 def process_pipeline(images):
     frames = [np.array(img.convert("RGB")) for img in images]
@@ -98,82 +91,90 @@ def process_pipeline(images):
     return enhanced, scene, params, masks
 
 # ===========================
-# COMPARISON SLIDER (FIXED)
+# SLIDER
 # ===========================
 def comparison_slider(orig, enh):
-    alpha = st.slider("🔄 Compare", 0, 100, 50)
+
+    if "slider_val" not in st.session_state:
+        st.session_state.slider_val = 50
+
+    alpha = st.slider(
+        "Compare",
+        0,
+        100,
+        st.session_state.slider_val,
+        key="slider"
+    )
+
+    st.session_state.slider_val = alpha
 
     orig = orig.convert("RGB")
-
     if isinstance(enh, np.ndarray):
         enh = Image.fromarray(enh)
 
     enh = enh.convert("RGB")
 
-    orig_np = np.array(orig).astype(float)
-    enh_np = np.array(enh).astype(float)
+    blend = (alpha/100)*np.array(enh) + (1-alpha/100)*np.array(orig)
 
-    blend = (alpha/100)*enh_np + (1-alpha/100)*orig_np
-    st.image(blend.astype(np.uint8), use_container_width=True)
+    st.image(blend.astype(np.uint8), width=400)
 
 # ===========================
-# UPLOAD SECTION
+# UPLOAD
 # ===========================
-st.markdown("### 📤 Upload Camera Frames (Burst Mode)")
+st.markdown("### 📤 Upload Burst Images")
+
 files = st.file_uploader(
-    "Upload Images",
+    "Upload",
     type=['png','jpg','jpeg'],
     accept_multiple_files=True,
     label_visibility="collapsed"
 )
 
 # ===========================
-# MAIN PROCESS
+# PROCESS
 # ===========================
 if files:
     images = [Image.open(f) for f in files]
 
     st.markdown("### 📷 Input Frames")
-    cols = st.columns(min(4, len(images)))
+    cols = st.columns(3)
+
     for i, img in enumerate(images):
-        cols[i % 4].image(img, use_container_width=True)
+        cols[i % 3].image(img, width=200)
 
     if st.button("🚀 Enhance"):
 
-        with st.spinner("🧠 Running Adaptive Pipeline..."):
+        with st.spinner("Processing..."):
             start = time.time()
             enhanced, scene, params, masks = process_pipeline(images)
             end = time.time()
 
-        st.success(f"✅ Completed in {end-start:.2f}s")
+        st.success(f"Done in {end-start:.2f}s")
+
+        st.markdown("---")
+
+        # RESULT SECTION
+        st.markdown("## 🎯 Results")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("### 📷 Original")
-            st.image(images[0], use_container_width=True)
+            st.image(images[0], caption="Original", width=350)
 
         with col2:
-            st.markdown("### ✨ Enhanced")
-            st.image(enhanced, use_container_width=True)
+            st.image(enhanced, caption="Enhanced", width=350)
 
-        # ===========================
-        # COMPARISON
-        # ===========================
-        st.markdown("### 🔄 Before vs After")
+        # SLIDER
+        st.markdown("### 🔄 Compare")
         comparison_slider(images[0], enhanced)
 
-        # ===========================
         # MOTION MASK
-        # ===========================
-        st.markdown("### 🎯 Motion Mask")
         if masks:
-            st.image(masks[0]['soft'], use_container_width=True)
+            st.markdown("### 🎯 Motion Mask")
+            st.image(masks[0]['soft'], width=350)
 
-        # ===========================
-        # SCENE ANALYSIS
-        # ===========================
-        st.markdown("### 🧠 Scene Analysis")
+        # METRICS
+        st.markdown("### 🧠 Analysis")
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Brightness", f"{scene['brightness']:.2f}")
@@ -181,31 +182,32 @@ if files:
         c3.metric("Contrast", f"{scene['contrast']:.2f}")
         c4.metric("Motion", f"{scene['motion']:.2f}")
 
-        # ===========================
-        # ADAPTIVE PARAMETERS
-        # ===========================
-        st.markdown("### ⚙️ Adaptive Decisions")
+        # PARAMETERS
+        st.markdown("### ⚙️ Adaptive Parameters")
 
         d1, d2, d3, d4 = st.columns(4)
         d1.metric("Gamma", params["gamma"])
         d2.metric("CLAHE", params["clahe_clip"])
         d3.metric("Denoise", params["denoise"])
-        d4.metric("Frames Used", params["num_frames"])
+        d4.metric("Frames", params["num_frames"])
 
-        # ===========================
-        # GRAPH
-        # ===========================
-        st.markdown("### 📊 Scene Graph")
+        # GRAPH (SMALL)
+        fig, ax = plt.subplots(figsize=(3, 2))  # smaller
 
-        fig, ax = plt.subplots()
-        ax.bar(scene.keys(), scene.values())
-        st.pyplot(fig)
+        ax.bar(list(scene.keys()), list(scene.values()))
 
-        # ===========================
+        ax.set_xticklabels(scene.keys(), rotation=45, fontsize=8)
+        ax.set_title("Scene", fontsize=10)
+
+        st.pyplot(fig, use_container_width=False)
+
         # DOWNLOAD
-        # ===========================
-        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        cv2.imwrite(tmp.name, cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR))
+        
+        _, buffer = cv2.imencode(".png", cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR))
 
-        with open(tmp.name, "rb") as f:
-            st.download_button("⬇ Download Enhanced Image", f)
+        st.download_button(
+            label="⬇ Download Image",
+            data=buffer.tobytes(),
+            file_name="enhanced.png",
+            mime="image/png"
+)
