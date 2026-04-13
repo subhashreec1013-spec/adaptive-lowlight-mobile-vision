@@ -1,6 +1,6 @@
 """
 fusion.py
-Adaptive Multi-exposure fusion with motion-aware weighting (FINAL CORRECT VERSION)
+Adaptive Multi-exposure fusion with motion-aware weighting (FINAL STABLE VERSION)
 """
 
 import cv2
@@ -11,7 +11,6 @@ from core.semantic_mask import SemanticMaskGenerator
 
 class MultiExposureFusion:
     def __init__(self):
-        # Safe exposure levels
         self.exposure_levels = [0.9, 1.0, 1.1]
 
     def adjust_exposure(self, image, gamma):
@@ -26,25 +25,32 @@ class MultiExposureFusion:
             gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
             gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
+            # Contrast
             contrast = cv2.Laplacian(gray_blur, cv2.CV_32F)
             contrast = np.abs(contrast)
             contrast = cv2.normalize(contrast, None, 0, 1, cv2.NORM_MINMAX)
 
+            # Saturation
             hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
             saturation = hsv[:, :, 1].astype(np.float32) / 255.0
 
+            # Well-exposedness
             img_float = img.astype(np.float32) / 255.0
             well_exposed = np.exp(-0.5 * ((img_float - 0.5) ** 2) / 0.08)
             well_exposed = np.prod(well_exposed, axis=2)
 
-            # 🔥 Balanced weight (LESS artifacts)
-            weight = (contrast + saturation + well_exposed) / 3.0
+            # ✅ FIX 1: Balanced weight (NO over-dark / NO artifacts)
+            weight = (contrast + 0.3) * (saturation + 0.3) * (well_exposed + 0.3)
+
+            # ✅ FIX 2: Prevent zero / extreme values
+            weight = np.clip(weight, 0.01, 1.0)
 
             weight = cv2.GaussianBlur(weight, (7, 7), 0)
 
             weights.append(weight)
 
-        weight_sum = np.sum(weights, axis=0) + 1e-6
+        # ✅ FIX 3: Stable normalization
+        weight_sum = np.maximum(np.sum(weights, axis=0), 1e-3)
         weights = [w / weight_sum for w in weights]
 
         return weights
@@ -62,29 +68,28 @@ class MultiExposureFusion:
 # ================================
 # POST PROCESS
 # ================================
-def post_process(image, clahe_clip=2.0, denoise=10):
+def post_process(image, clahe_clip=2.0, denoise=8):
 
     lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     l, a, b = cv2.split(lab)
 
-    clahe_clip = min(2.0, clahe_clip)
-
+    # ✅ FIX 4: Reduce over-enhancement
     clahe = cv2.createCLAHE(
-        clipLimit=clahe_clip,
+        clipLimit=min(1.5, clahe_clip),
         tileGridSize=(8, 8)
     )
 
     l_enhanced = clahe.apply(l)
-    lab_enhanced = cv2.merge([l_enhanced, a, b])
-    enhanced = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2RGB)
 
-    # Smooth + denoise
-    enhanced = cv2.bilateralFilter(enhanced, 5, 50, 50)
+    lab = cv2.merge([l_enhanced, a, b])
+    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 
-    if denoise > 0:
-        enhanced = cv2.fastNlMeansDenoisingColored(
-            enhanced, None, max(10, denoise), max(10, denoise), 7, 21
-        )
+    # ✅ FIX 5: Limit denoise (avoid blur)
+    denoise = min(10, denoise)
+
+    enhanced = cv2.fastNlMeansDenoisingColored(
+        enhanced, None, denoise, denoise, 7, 21
+    )
 
     return enhanced
 
@@ -110,10 +115,7 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
 
     print(f"Using params → Gamma: {gamma}, CLAHE: {clahe_clip}, Denoise: {denoise}")
 
-    # ================================
-    # 🔥 REAL MULTI-FRAME BASE IMAGE
-    # ================================
-    base_frame = np.mean(frames, axis=0).astype(np.uint8)
+    base_frame = frames[0]
 
     # EXPOSURES
     exposures = []
@@ -124,7 +126,9 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
     # WEIGHTS
     weights = fusion.compute_weight_maps(exposures)
 
-    # MOTION MASK
+    # ================================
+    # MOTION MASK (FIXED)
+    # ================================
     if masks is not None and len(masks) > 0:
         print("Applying motion-aware weighting...")
 
@@ -139,9 +143,10 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
         motion_mask = cv2.GaussianBlur(motion_mask, (7, 7), 0)
 
         for i in range(len(weights)):
-            weights[i] = weights[i] * motion_mask
+            # ✅ FIX 6: Don't kill brightness
+            weights[i] = weights[i] * (0.9 + 0.1 * motion_mask)
 
-        weight_sum = np.sum(weights, axis=0) + 1e-6
+        weight_sum = np.maximum(np.sum(weights, axis=0), 1e-3)
         weights = [w / weight_sum for w in weights]
 
     # FUSION

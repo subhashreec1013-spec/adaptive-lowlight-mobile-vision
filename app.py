@@ -5,7 +5,6 @@ import streamlit as st
 import cv2
 import numpy as np
 from PIL import Image
-import tempfile
 import time
 import matplotlib.pyplot as plt
 
@@ -22,13 +21,11 @@ pipeline = LowLightEnhancementPipeline()
 st.set_page_config(page_title="LuminaEnhance Pro", page_icon="🔆", layout="wide")
 
 # ===========================
-# PREMIUM CSS
+# CSS
 # ===========================
 st.markdown("""
 <style>
-body {
-    background: linear-gradient(135deg, #0f172a, #020617);
-}
+body {background: linear-gradient(135deg, #0f172a, #020617);}
 
 .title {
     font-size: 3rem;
@@ -50,17 +47,12 @@ body {
     padding: 12px;
     border-radius: 12px;
     text-align: center;
-    backdrop-filter: blur(8px);
-}
-
-.section {
-    margin-top: 30px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ===========================
-# HERO
+# HEADER
 # ===========================
 st.markdown("<div class='title'>🔆 LuminaEnhance Pro</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Adaptive Low-Light Enhancement for Mobile Cameras</div>", unsafe_allow_html=True)
@@ -94,17 +86,10 @@ def process_pipeline(images):
 # SLIDER
 # ===========================
 def comparison_slider(orig, enh):
-
     if "slider_val" not in st.session_state:
         st.session_state.slider_val = 50
 
-    alpha = st.slider(
-        "Compare",
-        0,
-        100,
-        st.session_state.slider_val,
-        key="slider"
-    )
+    alpha = st.slider("Compare", 0, 100, st.session_state.slider_val)
 
     st.session_state.slider_val = alpha
 
@@ -131,7 +116,7 @@ files = st.file_uploader(
 )
 
 # ===========================
-# PROCESS
+# MAIN
 # ===========================
 if files:
     images = [Image.open(f) for f in files]
@@ -142,6 +127,9 @@ if files:
     for i, img in enumerate(images):
         cols[i % 3].image(img, width=200)
 
+    # ===========================
+    # BUTTON
+    # ===========================
     if st.button("🚀 Enhance"):
 
         with st.spinner("Processing..."):
@@ -149,65 +137,110 @@ if files:
             enhanced, scene, params, masks = process_pipeline(images)
             end = time.time()
 
+        # 🔥 STORE RESULTS
+        st.session_state["enhanced"] = enhanced
+        st.session_state["scene"] = scene
+        st.session_state["params"] = params
+        st.session_state["masks"] = masks
+        st.session_state["original"] = images[0]
+
         st.success(f"Done in {end-start:.2f}s")
 
-        st.markdown("---")
+# ===========================
+# 🔥 SHOW RESULTS (OUTSIDE BUTTON)
+# ===========================
+if "enhanced" in st.session_state:
 
-        # RESULT SECTION
-        st.markdown("## 🎯 Results")
+    enhanced = st.session_state["enhanced"]
+    scene = st.session_state["scene"]
+    params = st.session_state["params"]
+    masks = st.session_state["masks"]
+    original = st.session_state["original"]
+
+    st.markdown("---")
+    st.markdown("## 🎯 Results")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.image(images[0], caption="Original", width=350)
+
+    with col2:
+        st.image(enhanced, caption="Enhanced", width=350)
+
+    # SLIDER
+    st.markdown("### 🔄 Compare")
+    comparison_slider(original, enhanced)
+
+    # ===========================
+# MOTION MASK (DEBUG VIEW)
+# ===========================
+if "masks" in st.session_state:
+
+    masks = st.session_state["masks"]
+    original = st.session_state["original"]
+
+    if masks:
+        st.markdown("### 🎯 Motion Mask")
+
+        mask_vis = cv2.normalize(
+            masks[0]['soft'],
+            None,
+            0,
+            255,
+            cv2.NORM_MINMAX
+        ).astype(np.uint8)
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.image(images[0], caption="Original", width=350)
+            st.image(original, caption="Original", width=250)
 
         with col2:
-            st.image(enhanced, caption="Enhanced", width=350)
+            st.image(mask_vis, caption="Motion Mask", width=250)
 
-        # SLIDER
-        st.markdown("### 🔄 Compare")
-        comparison_slider(images[0], enhanced)
+        # Debug values
+        st.write("Mask min:", np.min(masks[0]['soft']))
+        st.write("Mask max:", np.max(masks[0]['soft']))
 
-        # MOTION MASK
-        if masks:
-            st.markdown("### 🎯 Motion Mask")
-            st.image(masks[0]['soft'], width=350)
+    # METRICS
+    st.markdown("### 🧠 Analysis")
 
-        # METRICS
-        st.markdown("### 🧠 Analysis")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Brightness", f"{scene['brightness']:.2f}")
+    c2.metric("Noise", f"{scene['noise']:.2f}")
+    c3.metric("Contrast", f"{scene['contrast']:.2f}")
+    c4.metric("Motion", f"{scene['motion']:.2f}")
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Brightness", f"{scene['brightness']:.2f}")
-        c2.metric("Noise", f"{scene['noise']:.2f}")
-        c3.metric("Contrast", f"{scene['contrast']:.2f}")
-        c4.metric("Motion", f"{scene['motion']:.2f}")
+    # PARAMETERS
+    st.markdown("### ⚙️ Adaptive Parameters")
 
-        # PARAMETERS
-        st.markdown("### ⚙️ Adaptive Parameters")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Gamma", params["gamma"])
+    d2.metric("CLAHE", params["clahe_clip"])
+    d3.metric("Denoise", params["denoise"])
+    d4.metric("Frames", params["num_frames"])
 
-        d1, d2, d3, d4 = st.columns(4)
-        d1.metric("Gamma", params["gamma"])
-        d2.metric("CLAHE", params["clahe_clip"])
-        d3.metric("Denoise", params["denoise"])
-        d4.metric("Frames", params["num_frames"])
+    # GRAPH
+    st.markdown("### 📊 Graph")
 
-        # GRAPH (SMALL)
-        fig, ax = plt.subplots(figsize=(3, 2))  # smaller
+    g1, g2 = st.columns([1, 2])
 
-        ax.bar(list(scene.keys()), list(scene.values()))
+    with g1:
+       fig, ax = plt.subplots(figsize=(3, 2))
+       ax.bar(list(scene.keys()), list(scene.values()))
+       ax.set_title("Scene", fontsize=10)
+       st.pyplot(fig)
 
-        ax.set_xticklabels(scene.keys(), rotation=45, fontsize=8)
-        ax.set_title("Scene", fontsize=10)
+    with g2:
+       st.write("")  # empty space for balance
 
-        st.pyplot(fig, use_container_width=False)
+    # DOWNLOAD
+    _, buffer = cv2.imencode(".png", cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR))
 
-        # DOWNLOAD
-        
-        _, buffer = cv2.imencode(".png", cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR))
-
-        st.download_button(
-            label="⬇ Download Image",
-            data=buffer.tobytes(),
-            file_name="enhanced.png",
-            mime="image/png"
-)
+    st.download_button(
+        label="⬇ Download Image",
+        data=buffer.tobytes(),
+        file_name="enhanced.png",
+        mime="image/png"
+    )
