@@ -1,11 +1,10 @@
 """
 fusion.py
-Adaptive Multi-exposure fusion with motion-aware weighting (FINAL STABLE VERSION)
+Adaptive Multi-frame fusion with motion-aware weighting (FINAL WORKING VERSION)
 """
 
 import cv2
 import numpy as np
-from config import config
 from core.semantic_mask import SemanticMaskGenerator
 
 
@@ -39,17 +38,14 @@ class MultiExposureFusion:
             well_exposed = np.exp(-0.5 * ((img_float - 0.5) ** 2) / 0.08)
             well_exposed = np.prod(well_exposed, axis=2)
 
-            # ✅ FIX 1: Balanced weight (NO over-dark / NO artifacts)
+            # Balanced weight
             weight = (contrast + 0.3) * (saturation + 0.3) * (well_exposed + 0.3)
-
-            # ✅ FIX 2: Prevent zero / extreme values
             weight = np.clip(weight, 0.01, 1.0)
 
             weight = cv2.GaussianBlur(weight, (7, 7), 0)
-
             weights.append(weight)
 
-        # ✅ FIX 3: Stable normalization
+        # Stable normalization
         weight_sum = np.maximum(np.sum(weights, axis=0), 1e-3)
         weights = [w / weight_sum for w in weights]
 
@@ -73,7 +69,6 @@ def post_process(image, clahe_clip=2.0, denoise=8):
     lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     l, a, b = cv2.split(lab)
 
-    # ✅ FIX 4: Reduce over-enhancement
     clahe = cv2.createCLAHE(
         clipLimit=min(1.5, clahe_clip),
         tileGridSize=(8, 8)
@@ -84,7 +79,6 @@ def post_process(image, clahe_clip=2.0, denoise=8):
     lab = cv2.merge([l_enhanced, a, b])
     enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 
-    # ✅ FIX 5: Limit denoise (avoid blur)
     denoise = min(10, denoise)
 
     enhanced = cv2.fastNlMeansDenoisingColored(
@@ -115,19 +109,20 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
 
     print(f"Using params → Gamma: {gamma}, CLAHE: {clahe_clip}, Denoise: {denoise}")
 
-    base_frame = frames[0]
-
-    # EXPOSURES
+    # ================================
+    # USE ALL FRAMES (REAL MULTI-FRAME)
+    # ================================
     exposures = []
-    for g in fusion.exposure_levels:
-        adjusted = fusion.adjust_exposure(base_frame, g * gamma)
+
+    for frame in frames:
+        adjusted = fusion.adjust_exposure(frame, gamma)
         exposures.append(adjusted)
 
     # WEIGHTS
     weights = fusion.compute_weight_maps(exposures)
 
     # ================================
-    # MOTION MASK (FIXED)
+    # MOTION MASK
     # ================================
     if masks is not None and len(masks) > 0:
         print("Applying motion-aware weighting...")
@@ -143,23 +138,28 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
         motion_mask = cv2.GaussianBlur(motion_mask, (7, 7), 0)
 
         for i in range(len(weights)):
-            # ✅ FIX 6: Don't kill brightness
             weights[i] = weights[i] * (0.9 + 0.1 * motion_mask)
 
         weight_sum = np.maximum(np.sum(weights, axis=0), 1e-3)
         weights = [w / weight_sum for w in weights]
 
+    # ================================
     # FUSION
+    # ================================
     fused = fusion.fuse_images(exposures, weights)
 
+    # ================================
     # POST PROCESS
+    # ================================
     enhanced = post_process(fused, clahe_clip, denoise)
 
+    # ================================
     # SEMANTIC PROTECTION
+    # ================================
     semantic = SemanticMaskGenerator()
-    enhanced = semantic.apply_semantic_protection(base_frame, enhanced)
+    enhanced = semantic.apply_semantic_protection(frames[0], enhanced)
 
-    # SAVE
+    # SAVE (optional)
     cv2.imwrite('results/fused.png', fused)
     cv2.imwrite('results/enhanced.png', enhanced)
 
