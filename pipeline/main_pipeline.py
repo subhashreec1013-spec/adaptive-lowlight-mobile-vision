@@ -35,6 +35,10 @@ class LowLightEnhancementPipeline:
         Main pipeline for given frames
         (USED BY STREAMLIT)
         """
+        valid_frames = [f for f in frames if f is not None]
+
+        h, w = valid_frames[0].shape[:2]
+        frames = [cv2.resize(f, (w, h)) for f in valid_frames]
 
         # =========================
         # STEP 1: FLOW

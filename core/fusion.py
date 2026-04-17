@@ -1,6 +1,6 @@
 """
 fusion.py
-Adaptive Multi-frame fusion with motion-aware weighting (FINAL WORKING VERSION)
+Adaptive Multi-frame fusion with motion-aware weighting (FINAL BALANCED VERSION)
 """
 
 import cv2
@@ -14,7 +14,7 @@ class MultiExposureFusion:
 
     def adjust_exposure(self, image, gamma):
         img_norm = image.astype(np.float32) / 255.0
-        adjusted = np.power(img_norm, 1 / gamma)
+        adjusted = np.power(img_norm, gamma)
         return np.clip(adjusted * 255, 0, 255).astype(np.uint8)
 
     def compute_weight_maps(self, images):
@@ -33,19 +33,18 @@ class MultiExposureFusion:
             hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
             saturation = hsv[:, :, 1].astype(np.float32) / 255.0
 
-            # Well-exposedness
+            # Improved exposure weighting
             img_float = img.astype(np.float32) / 255.0
-            well_exposed = np.exp(-0.5 * ((img_float - 0.5) ** 2) / 0.08)
+            well_exposed = np.exp(-0.5 * ((img_float - 0.6) ** 2) / 0.2)
             well_exposed = np.prod(well_exposed, axis=2)
 
-            # Balanced weight
-            weight = (contrast + 0.3) * (saturation + 0.3) * (well_exposed + 0.3)
+            # Balanced weight (tuned)
+            weight = (contrast + 0.3) * (saturation + 0.3) * (well_exposed + 0.4)
             weight = np.clip(weight, 0.01, 1.0)
 
             weight = cv2.GaussianBlur(weight, (7, 7), 0)
             weights.append(weight)
 
-        # Stable normalization
         weight_sum = np.maximum(np.sum(weights, axis=0), 1e-3)
         weights = [w / weight_sum for w in weights]
 
@@ -62,27 +61,27 @@ class MultiExposureFusion:
 
 
 # ================================
-# POST PROCESS
+# POST PROCESS (BALANCED)
 # ================================
-def post_process(image, clahe_clip=2.0, denoise=8):
+def post_process(image):
 
     lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     l, a, b = cv2.split(lab)
 
+    # Balanced CLAHE (not too strong)
     clahe = cv2.createCLAHE(
-        clipLimit=min(1.5, clahe_clip),
+        clipLimit=2.0,
         tileGridSize=(8, 8)
     )
 
-    l_enhanced = clahe.apply(l)
+    l = clahe.apply(l)
 
-    lab = cv2.merge([l_enhanced, a, b])
+    lab = cv2.merge([l, a, b])
     enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 
-    denoise = min(10, denoise)
-
+    # Mild denoise (avoid blur)
     enhanced = cv2.fastNlMeansDenoisingColored(
-        enhanced, None, denoise, denoise, 7, 21
+        enhanced, None, 6, 6, 7, 21
     )
 
     return enhanced
@@ -97,20 +96,13 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
 
     fusion = MultiExposureFusion()
 
-    # PARAMETERS
-    if params is not None:
-        gamma = params.get("gamma", 1.0)
-        clahe_clip = params.get("clahe_clip", 2.0)
-        denoise = params.get("denoise", 10)
-    else:
-        gamma = 1.0
-        clahe_clip = 2.0
-        denoise = 10
+    # Balanced gamma (important)
+    gamma = 0.7
 
-    print(f"Using params → Gamma: {gamma}, CLAHE: {clahe_clip}, Denoise: {denoise}")
+    print(f"Using Gamma: {gamma}")
 
     # ================================
-    # USE ALL FRAMES (REAL MULTI-FRAME)
+    # EXPOSURE ADJUSTMENT
     # ================================
     exposures = []
 
@@ -118,11 +110,13 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
         adjusted = fusion.adjust_exposure(frame, gamma)
         exposures.append(adjusted)
 
+    # ================================
     # WEIGHTS
+    # ================================
     weights = fusion.compute_weight_maps(exposures)
 
     # ================================
-    # MOTION MASK
+    # MOTION MASK (optional)
     # ================================
     if masks is not None and len(masks) > 0:
         print("Applying motion-aware weighting...")
@@ -151,7 +145,7 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
     # ================================
     # POST PROCESS
     # ================================
-    enhanced = post_process(fused, clahe_clip, denoise)
+    enhanced = post_process(fused)
 
     # ================================
     # SEMANTIC PROTECTION
@@ -159,7 +153,32 @@ def enhance_low_light(frames, flows=None, masks=None, params=None):
     semantic = SemanticMaskGenerator()
     enhanced = semantic.apply_semantic_protection(frames[0], enhanced)
 
-    # SAVE (optional)
+    # ================================
+    # SIMPLE & STABLE FINAL ENHANCEMENT
+    # ================================
+
+    # Use first frame as base (more stable)
+    base = frames[0].copy()
+
+    # Convert to LAB
+    lab = cv2.cvtColor(base, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+
+    # Strong but safe CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
+    l = clahe.apply(l)
+
+    lab = cv2.merge((l, a, b))
+    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+
+    # Mild brightness + contrast
+    enhanced = cv2.convertScaleAbs(enhanced, alpha=1.3, beta=25)
+
+    # Light denoise
+    enhanced = cv2.fastNlMeansDenoisingColored(enhanced, None, 5, 5, 7, 21)
+
+    enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
+    # SAVE OUTPUTS
     cv2.imwrite('results/fused.png', fused)
     cv2.imwrite('results/enhanced.png', enhanced)
 
