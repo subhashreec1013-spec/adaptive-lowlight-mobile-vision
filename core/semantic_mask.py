@@ -1,17 +1,21 @@
+"""
+semantic_mask.py
+Semantic face protection mask (FIXED VERSION)
+"""
+
 import cv2
 import numpy as np
 
 
 class SemanticMaskGenerator:
     def __init__(self):
-        # Load Haar cascade for face detection
         self.face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
 
     def generate_face_mask(self, image):
         """
-        Detect faces and create mask
+        Detect faces and create a soft blended mask.
         """
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
@@ -25,36 +29,39 @@ class SemanticMaskGenerator:
         mask = np.zeros(gray.shape, dtype=np.float32)
 
         for (x, y, w, h) in faces:
-            # Create soft mask (smooth edges)
-            face_region = np.ones((h, w), dtype=np.float32)
+            mask[y:y+h, x:x+w] = 1.0
 
-            # Place in full mask
-            mask[y:y+h, x:x+w] = face_region
-
-        # Blur mask for smooth transition
+        # Soft edges
         mask = cv2.GaussianBlur(mask, (21, 21), 0)
 
         return mask
 
-    def apply_semantic_protection(self, image, enhanced):
+    def apply_semantic_protection(self, original, enhanced):
         """
-        Reduce enhancement strength in face regions
-        """
-        face_mask = self.generate_face_mask(image)
+        Blend enhanced and original in face regions to prevent over-processing.
 
+        FIX: Convert both inputs to float32 BEFORE multiplying.
+        Old code multiplied uint8 arrays directly → values overflowed 255
+        mid-calculation → blown-out whites + color corruption.
+        """
+        face_mask = self.generate_face_mask(original)
+
+        # No faces detected — return enhanced as-is, no blending needed
         if np.max(face_mask) == 0:
-            # No face detected
             return enhanced
 
-        # Normalize mask
+        # Normalize mask to 0–1
         face_mask = face_mask / (np.max(face_mask) + 1e-6)
-
-        # Expand to 3 channels
         face_mask_3ch = np.stack([face_mask] * 3, axis=2)
 
-        # Blend:
-        # face → more original
-        # background → enhanced
-        output = enhanced * (1 - face_mask_3ch) + image * face_mask_3ch
+        # FIX: Cast to float32 BEFORE any multiplication
+        # uint8 * float = silent overflow → garbage pixels
+        original_f = original.astype(np.float32)
+        enhanced_f = enhanced.astype(np.float32)
 
-        return output.astype(np.uint8)
+        # Face regions → blend toward original (protect from over-brightening)
+        # Background → keep fully enhanced
+        output = enhanced_f * (1.0 - face_mask_3ch) + original_f * face_mask_3ch
+
+        # Safe clip and cast back
+        return np.clip(output, 0, 255).astype(np.uint8)
